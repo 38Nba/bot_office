@@ -25,30 +25,19 @@ conn.commit()
 
 # --- Вспомогательные функции ---
 
-
 def is_valid_date(date_str):
     """Проверяет формат даты ДД.ММ.ГГ"""
     return re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_str) is not None
-
 
 def get_week_number(date_str):
     """Возвращает номер недели для даты в формате ГГГГ-ММ-ДД"""
     dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
     return dt.isocalendar()[1]
 
-
 # --- Обработчики команд ---
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Используйте /book <дата(ДД.ММ.ГГ)> <место> для бронирования.\n"
-        "Например: /book 25.12.23 A1\n"
-        "Чтобы отменить бронь: /cancel <дата(ДД.ММ.ГГ)> <место>\n"
-        "Посмотреть свои брони: /mybookings\n"
-        "Админские команды доступны только администраторам."
-    )
-
+    await update.message.reply_text("Привет! Используйте команды /book, /cancel, /mybookings.")
 
 async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -87,9 +76,13 @@ async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
     # Проверка занятости места на эту дату
-    cursor.execute("SELECT * FROM bookings WHERE date=? AND place=?", (date_str, place))
+    cursor.execute(
+        "SELECT * FROM bookings WHERE date=? AND place=?", (date_str, place)
+    )
     if cursor.fetchone():
-        await update.message.reply_text(f"Место {place} уже занято на {date_input}.")
+        await update.message.reply_text(
+            f"Место {place} уже занято на {date_input}."
+        )
         return
 
     # Проверка наличия брони у пользователя на эту дату
@@ -117,8 +110,14 @@ async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     conn.commit()
 
-    await update.message.reply_text(f"Бронь на {date_input} ({place}) успешно создана.")
+    # Отправляем картинку (замените путь на ваш файл)
+    try:
+        with open("Office.png", "rb") as photo:
+            await update.message.reply_photo(photo)
+    except FileNotFoundError:
+        pass  # если файла нет, ничего не делаем
 
+    await update.message.reply_text(f"Бронь на {date_input} ({place}) успешно создана.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -162,117 +161,108 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute(
         "SELECT * FROM bookings WHERE user_id=? AND date=? AND place=?",
         (user_id, date_str, place),
-    )
+     )
 
     record = cursor.fetchone()
 
     if not record:
-        await update.message.reply_text("У вас нет такой брони.")
-        return
+         await update.message.reply_text("У вас нет такой брони.")
+         return
 
     # Удаление брони
+
     cursor.execute(
-        "DELETE FROM bookings WHERE user_id=? AND date=? AND place=?",
-        (user_id, date_str, place),
-    )
+         "DELETE FROM bookings WHERE user_id=? AND date=? AND place=?",
+         (user_id, date_str, place),
+     )
 
     conn.commit()
 
     await update.message.reply_text(f"Бронь на {date_input} ({place}) отменена.")
 
-
 async def mybookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+     user_id = update.message.from_user.id
 
-    cursor.execute("SELECT date, place FROM bookings WHERE user_id=?", (user_id,))
+     cursor.execute("SELECT date, place FROM bookings WHERE user_id=?", (user_id,))
+     records = cursor.fetchall()
 
-    records = cursor.fetchall()
+     if not records:
+         await update.message.reply_text("У вас нет текущих броней.")
+         return
 
-    if not records:
-        await update.message.reply_text("У вас нет текущих броней.")
-        return
+     message_lines = []
+     for record in records:
+         date_str_iso = record[0]
+         place = record[1]
+         dt_obj = datetime.datetime.strptime(date_str_iso, "%Y-%m-%d")
+         display_date = dt_obj.strftime("%d.%m.%y")
+         message_lines.append(f"{display_date} - {place}")
 
-    message_lines = []
-    for record in records:
-        date_str_iso = record[0]
-        place = record[1]
-        dt_obj = datetime.datetime.strptime(date_str_iso, "%Y-%m-%d")
-        display_date = dt_obj.strftime("%d.%m.%y")
-        message_lines.append(f"{display_date} - {place}")
-
-    message_text = "\n".join(message_lines)
-    await update.message.reply_text(f"Ваши брони:\n{message_text}")
-
+     message_text = "\n".join(message_lines)
+     await update.message.reply_text(f"Ваши брони:\n{message_text}")
 
 # --- Админская команда для добавления брони (/admin_book) ---
 async def admin_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_ids = [210993]  # вставьте свои id админов сюда
+     admin_ids = [210993]  # вставьте свои id админов сюда
+     user_id_admins = [update.effective_user.id]
 
-    user_id_admins = [update.effective_user.id]
+     if not any(uid in admin_ids for uid in user_id_admins):
+         await update.message.reply_text("Нет прав для этой команды.")
+         return
 
-    if not any(uid in admin_ids for uid in user_id_admins):
-        await update.message.reply_text("Нет прав для этой команды.")
-        return
+     args = context.args
+     if len(args) < 4:
+         await update.message.reply_text(
+             "Используйте /admin_book <телеграмм_ник> <имя> <дата(ДД.ММ.ГГ)> <место>"
+         )
+         return
 
-    args = context.args
-    if len(args) < 4:
-        await update.message.reply_text(
-            "Используйте /admin_book <телеграмм_ник> <имя> <дата(ДД.ММ.ГГ)> <место>"
-        )
-        return
+     target_username = args[0]
+     name_target = args[1]
+     date_str_input = args[2]
+     place_target = args[3].upper()
 
-    target_username = args[0]
-    name_target = args[1]
-    date_str_input = args[2]
-    place_target = args[3].upper()
+     # Проверка формата даты
+     if not is_valid_date(date_str_input):
+         await update.message.reply_text("Некорректная дата. Используйте ДД.ММ.ГГ")
+         return
 
-    # Проверка формата даты
-    if not is_valid_date(date_str_input):
-        await update.message.reply_text("Некорректная дата. Используйте ДД.ММ.ГГ")
-        return
+     match_date = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_str_input)
+     day, month, year_short= match_date.groups()
+     year_full= "20"+year_short
 
-    day, month, year_short = re.match(
-        r"^(\d{2})\.(\d{2})\.(\d{2})$", date_str_input
-    ).groups()
-    year_full = "20" + year_short
+     try:
+         dt_target = datetime.date(int(year_full), int(month), int(day))
+         target_date_iso = dt_target.strftime("%Y-%m-%d")
+         week_num = get_week_number(target_date_iso)
+     except ValueError:
+         await update.message.reply_text("Некорректная дата.")
+         return
 
-    try:
-        dt_target = datetime.date(int(year_full), int(month), int(day))
-        target_date_iso = dt_target.strftime("%Y-%m-%d")
-        week_num = get_week_number(target_date_iso)
-    except ValueError:
-        await update.message.reply_text("Некорректная дата.")
-        return
+     # Вставляем бронь для другого пользователя — по вашему сценарию.
+     cursor.execute(
+         """INSERT OR REPLACE INTO bookings (user_id, username, name, date, place, guest_of, week)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+         (0, target_username, name_target, target_date_iso, place_target, 0, week_num),
+     )
 
-    # Вставляем бронь для другого пользователя — по вашему сценарию.
-    # Можно искать пользователя по никнейму или просто вставлять как есть.
+     conn.commit()
 
-    cursor.execute(
-        """INSERT OR REPLACE INTO bookings (user_id, username, name, date, place, guest_of, week)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (0, target_username, name_target, target_date_iso, place_target, 0, week_num),
-    )
-
-    conn.commit()
-
-    await update.message.reply_text(
-        f"Бронь для {name_target} ({target_username}) добавлена на {date_str_input} в место {place_target}."
-    )
-
+     await update.message.reply_text(
+         f"Бронь для {name_target} ({target_username}) добавлена на {date_str_input} в место {place_target}."
+     )
 
 # --- Основная функция запуска бота ---
 def main():
-    application = ApplicationBuilder().token("7804867932:AAFgFGwPj9keutfNRc1_ZzLNzpoJ4hOM5fE").build()
+   application= ApplicationBuilder().token("7804867932:AAFgFGwPj9keutfNRc1_ZzLNzpoJ4hOM5fE").build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("book", book))
-    application.add_handler(CommandHandler("cancel", cancel))
-    application.add_handler(CommandHandler('mybookings', mybookings))
+   application.add_handler(CommandHandler("start", start))
+   application.add_handler(CommandHandler("book", book))
+   application.add_handler(CommandHandler("cancel", cancel))
+   application.add_handler(CommandHandler('mybookings', mybookings))
+   application.add_handler(CommandHandler('admin_book', admin_book))
 
-    # Админская команда
-    application.add_handler(CommandHandler('admin_book', admin_book))
-
-    application.run_polling()
+   application.run_polling()
 
 if __name__=='__main__':
-    main()
+   main()
