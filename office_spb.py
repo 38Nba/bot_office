@@ -37,7 +37,7 @@ def get_week_number(date_str):
 
 def find_nearest_available_date():
     today = datetime.date.today()
-    all_places = ["A1", "A2", "B1", "B2"]
+    all_places = ["A1", "A2", "A3", "A4", "A5", "A6", "B1", "B2", "B3", "B4", "B5"]
     for delta in range(0, 30):
         check_date = today + datetime.timedelta(days=delta)
         date_str = check_date.strftime("%Y-%m-%d")
@@ -53,6 +53,7 @@ def find_nearest_available_date():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Используйте команды:\n"
+        "/start - запуск бота,\n"
         "/book ДД.ММ.ГГ место tg - для бронирования,\n"
         "/cancel ДД.ММ.ГГ место - для отмены,\n"
         "/mybookings - для просмотра броней,\n"
