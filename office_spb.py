@@ -58,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/cancel ДД.ММ.ГГ место - для отмены,\n"
         "/mybookings - для просмотра броней,\n"
         "/friend_book ДД.ММ.ГГ место tg - для бронирования коллеги,\n"
-        "/viewbookings ДД.ММ.ГГ - чтобы посмотреть все брони на дату"
+        "/viewbookings ДД.ММ.ГГ - посмотреть все брони на дату"
 
     )
     # Отправка картинки Office.png
