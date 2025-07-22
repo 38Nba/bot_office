@@ -351,7 +351,7 @@ async def friend_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Регистрация обработчиков и запуск бота ---
 
 if __name__ == '__main__':
-    application = ApplicationBuilder().token('7804867932:AAEheHSwhbLC4sJb1n1l_Lk6hZxrbUsBMGc').build()
+    application = ApplicationBuilder().token('7804867932:AAHS1aXOMEcceGDnLsVEToIf3c2rysVgCHI').build()
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('book', book))
