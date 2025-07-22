@@ -9,10 +9,10 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 conn = sqlite3.connect("office_booking.db")
 cursor = conn.cursor()
 
-# Создаем таблицу бронирований, если не существует
+# Создаем таблицу бронирований, если не существует, с user_id как TEXT
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS bookings (
-    user_id INTEGER,
+    user_id TEXT,
     username TEXT,
     name TEXT,
     date TEXT,
@@ -23,22 +23,18 @@ CREATE TABLE IF NOT EXISTS bookings (
     PRIMARY KEY (user_id, date, place)
 )
 """)
-
 conn.commit()
 
 # --- Вспомогательные функции ---
-
 
 def is_valid_date(date_str):
     """Проверяет формат даты ДД.ММ.ГГ"""
     return re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_str) is not None
 
-
 def get_week_number(date_str):
     """Возвращает номер недели для даты в формате ГГГГ-ММ-ДД"""
     dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
     return dt.isocalendar()[1]
-
 
 def find_nearest_available_date():
     today = datetime.date.today()
@@ -53,9 +49,7 @@ def find_nearest_available_date():
             return check_date.strftime("%d.%m.%Y"), free_places
     return None, []
 
-
 # --- Обработчики команд ---
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -80,7 +74,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message = "Нет доступных дат в ближайшем месяце."
     await update.message.reply_text(message)
-
 
 async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -128,20 +121,26 @@ async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Проверка наличия брони у пользователя на эту дату
+    user_id = str(update.message.from_user.id)
+
     cursor.execute(
         "SELECT * FROM bookings WHERE user_id=? AND date=?",
-        (update.message.from_user.id, date_str),
+        (user_id, date_str),
     )
+
     if cursor.fetchone():
         await update.message.reply_text("У вас уже есть бронь на эту дату.")
         return
 
     week_num = get_week_number(date_str)
 
+    # Вставляем бронь с user_id как UUID
+    new_user_id = str(uuid.uuid4())
+
     cursor.execute(
         "INSERT INTO bookings (user_id, username, name, date, place, guest_of, week, tg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            update.message.from_user.id,
+            new_user_id,
             update.message.from_user.username or "",
             update.message.from_user.first_name or "",
             date_str,
@@ -154,12 +153,6 @@ async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.commit()
 
-
-    await update.message.reply_text(
-    f"Бронь на {date_input} ({place}) {tg_value} успешно создана."
-)
-
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 2:
@@ -169,9 +162,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     date_input = args[0]
-    place = args[1].upper()
 
     match = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_input)
+
     if not match:
         await update.message.reply_text(
             "Некорректный формат даты. Используйте ДД.ММ.ГГ"
@@ -179,6 +172,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     day, month, year_short = match.groups()
+
+    # Формируем полную дату
     year_full = "20" + year_short
 
     try:
@@ -192,11 +187,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Некорректная дата.")
         return
 
-    user_id = update.message.from_user.id
+    user_id = str(update.message.from_user.id)
 
     cursor.execute(
         "SELECT * FROM bookings WHERE user_id=? AND date=? AND place=?",
-        (user_id, date_str, place),
+        (user_id, date_str, args[1].upper()),
     )
 
     record = cursor.fetchone()
@@ -207,108 +202,99 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cursor.execute(
         "DELETE FROM bookings WHERE user_id=? AND date=? AND place=?",
-        (user_id, date_str, place),
+        (user_id, date_str, args[1].upper()),
     )
 
     conn.commit()
 
-    await update.message.reply_text(f"Бронь на {date_input} ({place}) отменена.")
-
+    await update.message.reply_text(f"Бронь на {date_input} ({args[1].upper()}) отменена.")
 
 async def mybookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user_id=str(update.message.from_user.id)
     cursor.execute("SELECT date, place FROM bookings WHERE user_id=?", (user_id,))
-    records = cursor.fetchall()
+    records=cursor.fetchall()
     if not records:
         await update.message.reply_text("У вас нет текущих броней.")
         return
-    message_lines = []
+    message_lines=[]
     for record in records:
-        date_iso = record[0]
-        place = record[1]
-        dt_obj = datetime.datetime.strptime(date_iso, "%Y-%m-%d")
-        display_date = dt_obj.strftime("%d.%m.%y")
+        date_iso=record[0]
+        place=record[1]
+        dt_obj=datetime.datetime.strptime(date_iso,"%Y-%m-%d")
+        display_date=dt_obj.strftime("%d.%m.%y")
         message_lines.append(f"{display_date} - {place}")
-    message_text = "\n".join(message_lines)
+    message_text="\n".join(message_lines)
     await update.message.reply_text(f"Ваши брони:\n{message_text}")
-
 
 # Новая функция для просмотра всех броней на дату
 async def view_bookings_on_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) != 1:
-        await update.message.reply_text(
-            "Используйте команду /viewbookings <дата(ДД.ММ.ГГ)>"
-        )
+    args=context.args
+    if len(args)!=1:
+        await update.message.reply_text("Используйте команду /viewbookings <дата(ДД.ММ.ГГ)>")
         return
 
-    date_input = args[0]
+    date_input=args[0]
 
     # Проверка формата даты
     if not is_valid_date(date_input):
-        await update.message.reply_text(
-            "Некорректный формат даты. Используйте ДД.ММ.ГГ"
-        )
+        await update.message.reply_text("Некорректный формат даты. Используйте ДД.ММ.ГГ")
         return
 
-    match = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_input)
-    day, mont, y_short = match.groups()
-    year_full = "20" + y_short
+    match=re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$",date_input)
+
+    day,mont,y_short=match.groups()
+
+    year_full="20"+y_short
 
     try:
-        dt = datetime.date(int(year_full), int(mont), int(day))
-        date_iso = dt.strftime("%Y-%m-%d")
+        dt=datetime.date(int(year_full),int(mont),int(day))
+        date_iso=dt.strftime("%Y-%m-%d")
     except ValueError:
         await update.message.reply_text("Некорректная дата.")
         return
 
     # Получаем все брони на эту дату
     cursor.execute("SELECT place,tg FROM bookings WHERE date=?", (date_iso,))
-    records = cursor.fetchall()
+    records=cursor.fetchall()
 
     if not records:
         await update.message.reply_text(f"На {date_input} нет забронированных мест.")
         return
 
-    message_lines = []
-    for place, tg in records:
+    message_lines=[]
+    for place,tg in records:
         message_lines.append(f"{place} {tg}")
 
-    message_text = "\n".join(message_lines)
-
+    message_text="\n".join(message_lines)
 
     await update.message.reply_text(f"Бронирования на {date_input}:\n{message_text}")
 
-
 # Бронирование коллеги
 async def friend_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) < 4:
-        await update.message.reply_text(
-            "Используйте /friend_book <дата(ДД.ММ.ГГ)> <место> <имя> <telegram>"
-        )
+    args=context.args
+    if len(args)<4:
+        await update.message.reply_text("Используйте /friend_book <дата(ДД.ММ.ГГ)> <место> <имя> <telegram>")
         return
 
-    date_input = args[0]
-    place = args[1].upper()
-    target_name = args[2]
-    tg_value = args[3]
+    date_input=args[0]
+    place=args[1].upper()
+    target_name=args[2]
+    tg_value=args[3]
 
-    # Проверка наличия символа '@' в tg_value
-    if '@' not in tg_value:
+    # Проверка наличия '@' в tg_value
+    if "@" not in tg_value:
         await update.message.reply_text(
             "Ошибка: Телеграм-имя должно содержать символ '@'. Пожалуйста, укажите правильный телеграм-аккаунт."
         )
         return
 
-    # Проверка формата даты
     match = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_input)
+
     if not match:
         await update.message.reply_text(
             "Некорректный формат даты. Используйте ДД.ММ.ГГ"
         )
         return
-
     day, month, year_short = match.groups()
     year_full = "20" + year_short
 
@@ -324,48 +310,64 @@ async def friend_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Проверка занятости места на эту дату
-    cursor.execute(
-        "SELECT * FROM bookings WHERE date=? AND place=?", (date_str, place)
-    )
+    cursor.execute("SELECT * FROM bookings WHERE date=? AND place=?", (date_str, place))
     if cursor.fetchone():
         await update.message.reply_text(f"Место {place} уже занято на {date_input}.")
         return
 
-    # Создаем нового "пользователя" для друга с уникальным user_id
-    new_user_id = uuid.uuid4().int >> 64  # Генерируем случайный 64-битный ID
+    # Проверка наличия брони у текущего пользователя на эту дату
+    user_id = str(update.message.from_user.id)
+    cursor.execute(
+        "SELECT * FROM bookings WHERE user_id=? AND date=?",
+        (user_id, date_str),
+    )
+    if cursor.fetchone():
+        await update.message.reply_text("У вас уже есть бронь на эту дату.")
+        return
 
-    week_num= get_week_number(date_str)
+    week_num = get_week_number(date_str)
 
-    # Вставляем бронь для друга с новым user_id
+    # Вставляем бронь для коллеги с новым user_id
+    new_user_id = str(uuid.uuid4())
+
     cursor.execute(
         "INSERT INTO bookings (user_id, username, name, date, place, guest_of, week, tg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             new_user_id,
-            "",  # Можно оставить пустым или указать имя/ник друга
+            update.message.from_user.username or "",
             target_name,
             date_str,
             place,
-            0,
+            1,  # guest_of=1 означает что это бронь коллеги
             week_num,
-            tg_value
+            tg_value,
         ),
     )
 
     conn.commit()
 
-    await update.message.reply_text(f"Бронь для {target_name} ({tg_value}) на {date_input} ({place}) успешно создана.")
+    await update.message.reply_text(
+        f"Бронь для {target_name} на {date_input} ({place}) успешно создана."
+    )
 
-# --- Регистрация обработчиков и запуск бота ---
 
-if __name__ == '__main__':
-    application = ApplicationBuilder().token('7804867932:AAGWp4wkySc0_ZJXYCeYvogHsXl4LIuO0Oo').build()
+# --- Основная функция и запуск бота ---
 
-    application.add_handler(CommandHandler('start', start))
-    application.add_handler(CommandHandler('book', book))
-    application.add_handler(CommandHandler('cancel', cancel))
-    application.add_handler(CommandHandler('mybookings', mybookings))
-    application.add_handler(CommandHandler('viewbookings', view_bookings_on_date))
-    application.add_handler(CommandHandler('friend_book', friend_book))
 
-    print("Бот запущен")
+def main():
+    # Замените 'YOUR_BOT_TOKEN' на ваш токен бота
+    application = ApplicationBuilder().token("7804867932:AAGWp4wkySc0_ZJXYCeYvogHsXl4LIuO0Oo").build()
+
+    # Регистрация командных обработчиков
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("book", book))
+    application.add_handler(CommandHandler("cancel", cancel))
+    application.add_handler(CommandHandler("mybookings", mybookings))
+    application.add_handler(CommandHandler("viewbookings", view_bookings_on_date))
+    application.add_handler(CommandHandler("friend_book", friend_book))
+
+    # Запуск polling
     application.run_polling()
+
+if __name__ == "__main__":
+    main()
