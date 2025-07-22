@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # --- Настройка базы данных ---
-conn = sqlite3.connect("bookings.db")
+conn = sqlite3.connect("office_booking.db")
 cursor = conn.cursor()
 
 # Создаем таблицу бронирований, если не существует
