@@ -1,6 +1,7 @@
 import datetime
 import re
 import sqlite3
+import uuid
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -54,12 +55,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Используйте команды:\n"
         "/start - запуск бота,\n"
-        "/book ДД.ММ.ГГ место tg - для бронирования,\n"
+        "/book ДД.ММ.ГГ место telegram - для бронирования,\n"
         "/cancel ДД.ММ.ГГ место - для отмены,\n"
         "/mybookings - для просмотра броней,\n"
-        "/friend_book ДД.ММ.ГГ место tg - для бронирования коллеги,\n"
+        "/friend_book ДД.ММ.ГГ место имя telegram - для бронирования коллеги,\n"
         "/viewbookings ДД.ММ.ГГ - посмотреть все бронирования на дату"
-
     )
     # Отправка картинки Office.png
     try:
@@ -82,13 +82,20 @@ async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 3:
         await update.message.reply_text(
-            "Используйте команду /book <дата(ДД.ММ.ГГ)> <место> <tg>"
+            "Используйте команду /book <дата(ДД.ММ.ГГ)> <место> <telegram>"
         )
         return
 
     date_input = args[0]
     place = args[1].upper()
     tg_value = args[2]
+
+    # Проверка наличия символа '@' в tg_value
+    if '@' not in tg_value:
+        await update.message.reply_text(
+            "Ошибка: Телеграм-имя должно содержать символ '@'. Пожалуйста, укажите правильный телеграм-аккаунт."
+        )
+        return
 
     match = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_input)
     if not match:
@@ -262,80 +269,96 @@ async def view_bookings_on_date(update: Update, context: ContextTypes.DEFAULT_TY
      message_text="\n".join(message_lines)
      await update.message.reply_text(f"Бронирования на {date_input}:\n{message_text}")
 
-# Бронирования коллеги
-
+# Бронирование коллеги
 async def friend_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 4:
         await update.message.reply_text(
-            "Используйте /friend_book ДД.ММ.ГГ место tg"
+            "Используйте /friend_book <дата(ДД.ММ.ГГ)> <место> <имя> <telegram>"
         )
         return
 
-    date_str_input = args[0]
-    place_target = args[1].upper()
-    target_username = args[2]
-    tg_username = args[3]
+    date_input = args[0]
+    place = args[1].upper()
+    target_name = args[2]
+    tg_value = args[3]
 
-    # Попытка парсинга даты в формате ДД.ММ.ГГ
+    # Проверка наличия символа '@' в tg_value
+    if '@' not in tg_value:
+        await update.message.reply_text(
+            "Ошибка: Телеграм-имя должно содержать символ '@'. Пожалуйста, укажите правильный телеграм-аккаунт."
+        )
+        return
+
+    # Проверка формата даты
+    match = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", date_input)
+    if not match:
+        await update.message.reply_text(
+            "Некорректный формат даты. Используйте ДД.ММ.ГГ"
+        )
+        return
+
+    day, month, year_short = match.groups()
+    year_full = "20" + year_short
+
     try:
-        dt = datetime.datetime.strptime(date_str_input, "%d.%m.%y").date()
-        target_date_iso = dt.strftime("%Y-%m-%d")
-        week_num = get_week_number(target_date_iso)
+        date_obj = datetime.date(int(year_full), int(month), int(day))
+        date_str = date_obj.strftime("%Y-%m-%d")
     except ValueError:
-        await update.message.reply_text("Некорректная дата. Используйте формат ДД.ММ.ГГ")
+        await update.message.reply_text("Некорректная дата.")
+        return
+
+    today = datetime.date.today()
+    if date_obj < today:
+        await update.message.reply_text("Невозможно забронировать прошедшую дату.")
         return
 
     # Проверка занятости места на эту дату
     cursor.execute(
-        "SELECT * FROM bookings WHERE date=? AND place=?", (target_date_iso, place_target)
+        "SELECT * FROM bookings WHERE date=? AND place=?", (date_str, place)
     )
     if cursor.fetchone():
-        await update.message.reply_text(f"Место {place_target} уже занято на {date_str_input}.")
+        await update.message.reply_text(
+            f"Место {place} уже занято на {date_input}."
+        )
         return
 
-    # Проверка, есть ли у этого пользователя уже бронь на эту дату
-    cursor.execute(
-        "SELECT * FROM bookings WHERE user_id=? AND date=?", (update.message.from_user.id, target_date_iso)
-    )
-    if cursor.fetchone():
-        await update.message.reply_text("У вас уже есть бронь на эту дату.")
-        return
+    # Создаем нового "пользователя" для друга с уникальным user_id
+    new_user_id = uuid.uuid4().int >> 64  # Генерируем случайный 64-битный ID
+    # Можно также использовать любой другой способ генерации уникального ID
 
-    # Вставляем бронь для коллеги
+    week_num= get_week_number(date_str)
+
+    # Вставляем бронь для друга с новым user_id
     cursor.execute(
         "INSERT INTO bookings (user_id, username, name, date, place, guest_of, week, tg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            None,
-            target_username,
-            None,  # Можно оставить пустым или указать имя при необходимости
-            target_date_iso,
-            place_target,
-            1,  # guest_of=1 означает что это бронь коллеги
+            new_user_id,
+            "",  # Можно оставить пустым или указать имя/ник друга
+            target_name,
+            date_str,
+            place,
+            0,
             week_num,
-            tg_username  # сохраняем tg как username коллеги
+            tg_value
         ),
     )
 
     conn.commit()
 
-    await update.message.reply_text(
-        f"Бронь для ({target_username}) на {date_str_input} ({place_target}) успешно добавлена."
-    )
+    await update.message.reply_text(f"Бронь для {target_name} ({tg_value}) на {date_input} ({place}) успешно создана.")
 
-# --- Основная часть запуска бота ---
+# --- Регистрация обработчиков и запуск бота ---
 
 if __name__ == '__main__':
-    TOKEN= "7804867932:AAFgFGwPj9keutfNRc1_ZzLNzpoJ4hOM5fE"  # замените на ваш токен бота
+    application = ApplicationBuilder().token('7804867932:AAEheHSwhbLC4sJb1n1l_Lk6hZxrbUsBMGc').build()
 
-    application= ApplicationBuilder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("book", book))
-    application.add_handler(CommandHandler("cancel", cancel))
-    application.add_handler(CommandHandler("mybookings", mybookings))
-    application.add_handler(CommandHandler("viewbookings", view_bookings_on_date))
-    application.add_handler(CommandHandler("friend_book", friend_book))
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('book', book))
+    application.add_handler(CommandHandler('cancel', cancel))
+    application.add_handler(CommandHandler('mybookings', mybookings))
+    application.add_handler(CommandHandler('viewbookings', view_bookings_on_date))
+    application.add_handler(CommandHandler('friend_book', friend_book))
 
     print("Бот запущен")
     application.run_polling()
